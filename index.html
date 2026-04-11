@@ -183,8 +183,9 @@ body{font-family:'Hiragino Sans','Meiryo','Yu Gothic',sans-serif;font-size:12px;
   }
   .shift-block.cont{border-style:dashed!important;opacity:.7;}
   .shift-block .del-btn{display:none!important;}
-  .sb-nm{font-size:9px!important;font-weight:bold!important;}
-  .sb-tm{font-size:8px!important;}
+  .sb-nm{font-size:11px!important;font-weight:bold!important;}
+  .sb-tm{font-size:9px!important;}
+  .time-lbl{font-size:8px!important;}
   /* 17パターン (スタッフ識別用) — グレー段階のみ、PDF軽量化 */
   [data-pt="0"] {background:#fff!important;color:#000!important;}
   [data-pt="1"] {background:#ebebeb!important;color:#000!important;}
@@ -579,8 +580,14 @@ function layoutShifts(shifts){
 }
 
 /* ── TIME / FORMAT HELPERS ── */
-function toPct(h){ return (Math.max(h,T_START)-T_START)/TOTAL_H*100; }
-function durPct(start,end){ return (Math.min(end,T_END)-Math.max(start,T_START))/TOTAL_H*100; }
+/* 非線形時間マッピング: 0-6h=10%, 6-22h=75%, 22-30h=15% */
+function toPct(h){
+  const t=Math.max(h,T_START)-T_START;
+  if(t<=6)  return t/6*10;
+  if(t<=22) return 10+(t-6)/16*75;
+  return 85+(t-22)/8*15;
+}
+function durPct(start,end){ return toPct(Math.min(end,T_END))-toPct(Math.max(start,T_START)); }
 function fmtH(h){
   if(h>=24) return `${Math.floor(h-24)}:${pad(Math.round(((h-24)%1)*60))}翌`;
   return `${Math.floor(h)}:${pad(Math.round((h%1)*60))}`;
