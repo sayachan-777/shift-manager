@@ -154,6 +154,26 @@ body{font-family:'Hiragino Sans','Meiryo','Yu Gothic',sans-serif;font-size:12px;
 /* ── PRINT LEGEND (hidden on screen) ── */
 #printLegend{display:none;}
 
+/* ── MOBILE VIEW (read-only shared URL) ── */
+.mobile-view{display:none;padding:8px;max-width:600px;margin:0 auto;}
+.mv-week{background:#1a4a7a;color:#fff;text-align:center;padding:8px;font-size:13px;font-weight:bold;border-radius:6px;margin-bottom:10px;}
+.mv-day{background:#fff;border-radius:8px;margin-bottom:10px;box-shadow:0 1px 4px rgba(0,0,0,.12);overflow:hidden;}
+.mv-day-hdr{padding:8px 12px;font-size:14px;font-weight:bold;border-bottom:1px solid #eee;display:flex;align-items:center;gap:8px;}
+.mv-day-hdr .mv-dow{font-size:16px;min-width:24px;}
+.mv-day-hdr .mv-hol{font-size:11px;padding:2px 7px;border-radius:10px;color:#fff;}
+.mv-shift{display:flex;align-items:center;padding:7px 12px;gap:10px;border-bottom:1px solid #f5f5f5;}
+.mv-shift:last-of-type{border-bottom:none;}
+.mv-dot{width:12px;height:12px;border-radius:3px;flex-shrink:0;}
+.mv-sname{font-size:13px;font-weight:bold;flex:1;}
+.mv-time{font-size:12px;color:#555;white-space:nowrap;}
+.mv-notes{padding:6px 12px;font-size:11px;color:#777;background:#fafafa;border-top:1px solid #eee;}
+.mv-empty{padding:10px 12px;font-size:12px;color:#bbb;text-align:center;}
+@media(max-width:767px){
+  body.readonly-mode .app-body{display:none!important;}
+  body.readonly-mode .mobile-view{display:block!important;}
+  body.readonly-mode .app-header .week-nav{display:none;}
+}
+
 /* ── PRINT ── */
 @media print{
   @page{size:A3 landscape;margin:6mm;}
@@ -242,6 +262,7 @@ body{font-family:'Hiragino Sans','Meiryo','Yu Gothic',sans-serif;font-size:12px;
   <button class="btn gray" onclick="window.print()">🖨 印刷(A3横)</button>
 </div>
 
+<div class="mobile-view" id="mobileView"></div>
 <div class="app-body">
   <div class="sidebar">
     <div class="sidebar-title">スタッフ（週回数）</div>
@@ -1053,8 +1074,64 @@ async function loadFromHash(){
   }catch(e){ return false; }
 }
 
+function renderMobileView(){
+  const wk = weekKey(state.weekStart);
+  const scheds = state.schedules[wk] || [];
+  const notes  = state.notes[wk]    || {};
+  const hols   = state.holidays[wk] || {};
+  const HOL_COLORS = {'':'','休み':'#e55353','有給':'#3062b8','欠勤':'#d4a017','その他':'#8e44ad'};
+  const weekLabel = `${state.weekStart.getFullYear()}年${fmtMD(state.weekStart)} 〜 ${fmtMD(addDays(state.weekStart,6))}`;
+
+  let html = `<div class="mv-week">📅 ${weekLabel}</div>`;
+
+  for(let d=0; d<7; d++){
+    const date = addDays(state.weekStart, d);
+    const dow  = DAYS_JA[d];
+    const isSat = d===5, isSun = d===6;
+    const dowColor = isSat ? '#1565c0' : isSun ? '#c62828' : '#333';
+    const dayHols = hols[d] || {};
+    const dayScheds = scheds.filter(s=>s.day===d).sort((a,b)=>a.start-b.start);
+    const note = notes[d] || '';
+
+    html += `<div class="mv-day">
+      <div class="mv-day-hdr">
+        <span class="mv-dow" style="color:${dowColor}">${dow}</span>
+        <span style="font-size:13px;color:#666;">${fmtMD(date)}</span>
+      </div>`;
+
+    if(dayScheds.length === 0){
+      html += `<div class="mv-empty">シフトなし</div>`;
+    } else {
+      dayScheds.forEach(s=>{
+        const st = state.staff.find(x=>x.id===s.staffId);
+        const name  = st ? st.name  : '?';
+        const color = st ? st.color : '#ccc';
+        const startH = Math.floor(s.start), startM = Math.round((s.start-startH)*60);
+        const endH   = Math.floor(s.end),   endM   = Math.round((s.end-endH)*60);
+        const ts = `${pad(startH%24)}:${pad(startM)}〜${pad(endH%24)}:${pad(endM)}${s.end>24?'(翌)':''}`;
+        const noteStr = s.note ? `　<span style="font-size:11px;color:#999;">${s.note}</span>` : '';
+        const holType = dayHols[s.staffId] || '';
+        const holBadge = holType ? `<span style="font-size:10px;padding:1px 5px;border-radius:8px;background:${HOL_COLORS[holType]||'#999'};color:#fff;margin-left:4px;">${holType}</span>` : '';
+        html += `<div class="mv-shift">
+          <span class="mv-dot" style="background:${color};"></span>
+          <span class="mv-sname">${name}${holBadge}</span>
+          <span class="mv-time">${ts}${noteStr}</span>
+        </div>`;
+      });
+    }
+
+    if(note){
+      html += `<div class="mv-notes">📝 ${note}</div>`;
+    }
+    html += `</div>`;
+  }
+
+  document.getElementById('mobileView').innerHTML = html;
+}
+
 function applyReadOnlyMode(){
   readOnly = true;
+  document.body.classList.add('readonly-mode');
   document.getElementById('readonlyBadge').style.display = 'inline-block';
   document.getElementById('btnAutoGen').style.display  = 'none';
   document.getElementById('btnHoliday').style.display  = 'none';
@@ -1062,6 +1139,7 @@ function applyReadOnlyMode(){
   const style = document.createElement('style');
   style.textContent = '.del-btn{display:none!important;} .shifts-canvas{cursor:default!important;}';
   document.head.appendChild(style);
+  renderMobileView();
 }
 
 /* ── INIT ── */
