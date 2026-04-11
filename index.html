@@ -982,7 +982,6 @@ async function decompressFromB64(b64){
 /* ── 共有URL機能（v3: 圧縮＋コンパクト形式）── */
 async function generateShareURL(){
   const wk = weekKey(state.weekStart);
-  // コンパクト形式: staff=[id,name,color], sched=[staffId,day,start,end,note]
   const compact = {
     v: 3, wk,
     st: state.staff.map(s=>[s.id, s.name, s.color]),
@@ -991,9 +990,24 @@ async function generateShareURL(){
     hl: state.holidays[wk]||{},
   };
   const compressed = await compressToB64(JSON.stringify(compact));
-  const url = location.origin + location.pathname + '#share=' + compressed;
-  const msg = `✅ 共有URLをコピーしました！\n従業員にこのURLを送ってください。\n\nURL長さ: ${url.length}文字`;
-  navigator.clipboard.writeText(url).then(()=>alert(msg)).catch(()=>prompt('URLをコピーしてください：',url));
+  const longUrl = 'https://sayachan-777.github.io/shift-manager/index.html#share=' + compressed;
+
+  // URL短縮（is.gd API）
+  let finalUrl = longUrl;
+  try {
+    const res = await fetch('https://is.gd/create.php?format=simple&url=' + encodeURIComponent(longUrl));
+    if(res.ok){
+      const short = (await res.text()).trim();
+      if(short.startsWith('https://is.gd/') || short.startsWith('http://is.gd/')){
+        finalUrl = short;
+      }
+    }
+  } catch(e){ /* 短縮失敗時は長いURLをそのまま使用 */ }
+
+  const msg = finalUrl === longUrl
+    ? `✅ 共有URLをコピーしました！\n（短縮に失敗したため元のURLを使用）\n\nURL長さ: ${finalUrl.length}文字`
+    : `✅ 共有URLをコピーしました！\n従業員にこのURLをLINEで送ってください。\n\n${finalUrl}`;
+  navigator.clipboard.writeText(finalUrl).then(()=>alert(msg)).catch(()=>prompt('URLをコピーしてください：',finalUrl));
 }
 
 async function loadFromHash(){
