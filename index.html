@@ -953,47 +953,76 @@ function saveStaffEditor(){
 /* ── 共有URL機能 ── */
 let readOnly = false;
 
-function encodeShare(data){
-  try{ return btoa(unescape(encodeURIComponent(JSON.stringify(data)))); }catch(e){ return null; }
+/* ── deflate圧縮ユーティリティ ── */
+async function compressToB64(str){
+  const enc = new TextEncoder();
+  const cs  = new CompressionStream('deflate-raw');
+  const w   = cs.writable.getWriter();
+  w.write(enc.encode(str)); w.close();
+  const chunks=[]; const r=cs.readable.getReader();
+  while(true){const{done,value}=await r.read();if(done)break;chunks.push(value);}
+  const tot=chunks.reduce((n,c)=>n+c.length,0);
+  const out=new Uint8Array(tot); let i=0;
+  for(const c of chunks){out.set(c,i);i+=c.length;}
+  return btoa(String.fromCharCode(...out)).replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'');
 }
-function decodeShare(str){
-  try{ return JSON.parse(decodeURIComponent(escape(atob(str)))); }catch(e){ return null; }
+async function decompressFromB64(b64){
+  const bin=atob(b64.replace(/-/g,'+').replace(/_/g,'/'));
+  const bytes=Uint8Array.from(bin,c=>c.charCodeAt(0));
+  const ds=new DecompressionStream('deflate-raw');
+  const w=ds.writable.getWriter(); w.write(bytes); w.close();
+  const chunks=[]; const r=ds.readable.getReader();
+  while(true){const{done,value}=await r.read();if(done)break;chunks.push(value);}
+  const tot=chunks.reduce((n,c)=>n+c.length,0);
+  const out=new Uint8Array(tot); let i=0;
+  for(const c of chunks){out.set(c,i);i+=c.length;}
+  return new TextDecoder().decode(out);
 }
 
-function generateShareURL(){
+/* ── 共有URL機能（v3: 圧縮＋コンパクト形式）── */
+async function generateShareURL(){
   const wk = weekKey(state.weekStart);
-  const data = {
-    v: 1,
-    wk: wk,
-    staff: state.staff,
-    sched: state.schedules[wk] || [],
-    notes: (state.notes[wk] || {}),
-    hols:  (state.holidays[wk] || {}),
+  // コンパクト形式: staff=[id,name,color], sched=[staffId,day,start,end,note]
+  const compact = {
+    v: 3, wk,
+    st: state.staff.map(s=>[s.id, s.name, s.color]),
+    sc: (state.schedules[wk]||[]).map(s=>[s.staffId, s.day, s.start, s.end, s.note||'']),
+    nt: state.notes[wk]||{},
+    hl: state.holidays[wk]||{},
   };
-  const encoded = encodeShare(data);
-  if(!encoded){ alert('URLの生成に失敗しました'); return; }
-  const url = location.origin + location.pathname + '#share=' + encoded;
-  navigator.clipboard.writeText(url).then(()=>{
-    alert('✅ 共有URLをコピーしました！\n従業員にこのURLを送ってください。\n\n' + url.slice(0,80) + '...');
-  }).catch(()=>{
-    prompt('以下のURLをコピーして従業員に送ってください：', url);
-  });
+  const compressed = await compressToB64(JSON.stringify(compact));
+  const url = location.origin + location.pathname + '#share=' + compressed;
+  const msg = `✅ 共有URLをコピーしました！\n従業員にこのURLを送ってください。\n\nURL長さ: ${url.length}文字`;
+  navigator.clipboard.writeText(url).then(()=>alert(msg)).catch(()=>prompt('URLをコピーしてください：',url));
 }
 
-function loadFromHash(){
+async function loadFromHash(){
   const hash = location.hash;
   if(!hash.startsWith('#share=')) return false;
   const encoded = hash.slice(7);
-  const data = decodeShare(encoded);
-  if(!data || data.v !== 1) return false;
-  // stateに読み込む
-  state.staff = data.staff || state.staff;
-  const wk = data.wk;
-  state.weekStart = new Date(wk + 'T00:00:00');
-  if(data.sched) state.schedules[wk] = data.sched;
-  if(data.notes) state.notes[wk] = data.notes;
-  if(data.hols)  state.holidays[wk] = data.hols;
-  return true;
+  try{
+    let data;
+    if(encoded.includes('=')||encoded.startsWith('ey')){
+      // v1: 旧base64形式（後方互換）
+      data = JSON.parse(decodeURIComponent(escape(atob(encoded))));
+    } else {
+      // v3: deflate圧縮形式
+      data = JSON.parse(await decompressFromB64(encoded));
+    }
+    if(data.v===3){
+      state.staff = data.st.map(([id,name,color])=>({id,name,color,defaultSchedule:[]}));
+      const wk=data.wk; state.weekStart=new Date(wk+'T00:00:00');
+      state.schedules[wk]=data.sc.map(([staffId,day,start,end,note],i)=>({id:9000+i,staffId,day,start,end,note}));
+      state.notes[wk]=data.nt||{}; state.holidays[wk]=data.hl||{};
+    } else if(data.v===1){
+      state.staff=data.staff||state.staff;
+      const wk=data.wk; state.weekStart=new Date(wk+'T00:00:00');
+      if(data.sched) state.schedules[wk]=data.sched;
+      if(data.notes) state.notes[wk]=data.notes;
+      if(data.hols)  state.holidays[wk]=data.hols;
+    }
+    return true;
+  }catch(e){ return false; }
 }
 
 function applyReadOnlyMode(){
@@ -1002,20 +1031,17 @@ function applyReadOnlyMode(){
   document.getElementById('btnAutoGen').style.display  = 'none';
   document.getElementById('btnHoliday').style.display  = 'none';
   document.getElementById('btnStaff').style.display    = 'none';
-  // del-btn と クリックオーバーレイを非表示にするCSS追加
   const style = document.createElement('style');
   style.textContent = '.del-btn{display:none!important;} .shifts-canvas{cursor:default!important;}';
   document.head.appendChild(style);
 }
 
 /* ── INIT ── */
-const isShared = loadFromHash();
-if(isShared){
-  applyReadOnlyMode();
-} else {
-  load();
-}
-render();
+(async()=>{
+  const isShared = await loadFromHash();
+  if(isShared){ applyReadOnlyMode(); } else { load(); }
+  render();
+})();
 </script>
 </body>
 </html>
