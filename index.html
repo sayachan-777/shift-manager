@@ -233,9 +233,11 @@ body{font-family:'Hiragino Sans','Meiryo','Yu Gothic',sans-serif;font-size:12px;
     <span class="week-label" id="weekLabel">-</span>
     <button class="btn" onclick="changeWeek(1)">▶</button>
   </div>
-  <button class="btn green" onclick="autoGenerate()">⚡ 自動生成</button>
-  <button class="btn orange" onclick="openHolidaySheet()">📋 休日入力</button>
-  <button class="btn blue" onclick="openStaffEditor()">👥 スタッフ編集</button>
+  <span id="readonlyBadge" style="display:none;background:#e53935;color:#fff;border-radius:4px;padding:3px 10px;font-size:11px;font-weight:bold;">👁 閲覧専用</span>
+  <button class="btn green" id="btnAutoGen" onclick="autoGenerate()">⚡ 自動生成</button>
+  <button class="btn orange" id="btnHoliday" onclick="openHolidaySheet()">📋 休日入力</button>
+  <button class="btn blue" id="btnStaff" onclick="openStaffEditor()">👥 スタッフ編集</button>
+  <button class="btn" style="background:#7b1fa2;color:#fff;" onclick="generateShareURL()">📤 共有URL生成</button>
   <button class="btn gray" onclick="window.print()">🖨 印刷(A3横)</button>
 </div>
 
@@ -772,6 +774,7 @@ function renderGrid(){
 
 /* ── CLICK ON CANVAS ── */
 function clickCanvas(e,day){
+  if(readOnly) return;
   if(e.target.classList.contains('shift-block')||e.target.classList.contains('del-btn')) return;
   const rect=e.currentTarget.getBoundingClientRect();
   const xPct=(e.clientX-rect.left)/rect.width;
@@ -940,8 +943,71 @@ function saveStaffEditor(){
   save(); closeStaffEditor(); renderGrid(); renderLegend();
 }
 
+/* ── 共有URL機能 ── */
+let readOnly = false;
+
+function encodeShare(data){
+  try{ return btoa(unescape(encodeURIComponent(JSON.stringify(data)))); }catch(e){ return null; }
+}
+function decodeShare(str){
+  try{ return JSON.parse(decodeURIComponent(escape(atob(str)))); }catch(e){ return null; }
+}
+
+function generateShareURL(){
+  const wk = weekKey(state.weekStart);
+  const data = {
+    v: 1,
+    wk: wk,
+    staff: state.staff,
+    sched: state.schedules[wk] || [],
+    notes: (state.notes[wk] || {}),
+    hols:  (state.holidays[wk] || {}),
+  };
+  const encoded = encodeShare(data);
+  if(!encoded){ alert('URLの生成に失敗しました'); return; }
+  const url = location.origin + location.pathname + '#share=' + encoded;
+  navigator.clipboard.writeText(url).then(()=>{
+    alert('✅ 共有URLをコピーしました！\n従業員にこのURLを送ってください。\n\n' + url.slice(0,80) + '...');
+  }).catch(()=>{
+    prompt('以下のURLをコピーして従業員に送ってください：', url);
+  });
+}
+
+function loadFromHash(){
+  const hash = location.hash;
+  if(!hash.startsWith('#share=')) return false;
+  const encoded = hash.slice(7);
+  const data = decodeShare(encoded);
+  if(!data || data.v !== 1) return false;
+  // stateに読み込む
+  state.staff = data.staff || state.staff;
+  const wk = data.wk;
+  state.weekStart = new Date(wk + 'T00:00:00');
+  if(data.sched) state.schedules[wk] = data.sched;
+  if(data.notes) state.notes[wk] = data.notes;
+  if(data.hols)  state.holidays[wk] = data.hols;
+  return true;
+}
+
+function applyReadOnlyMode(){
+  readOnly = true;
+  document.getElementById('readonlyBadge').style.display = 'inline-block';
+  document.getElementById('btnAutoGen').style.display  = 'none';
+  document.getElementById('btnHoliday').style.display  = 'none';
+  document.getElementById('btnStaff').style.display    = 'none';
+  // del-btn と クリックオーバーレイを非表示にするCSS追加
+  const style = document.createElement('style');
+  style.textContent = '.del-btn{display:none!important;} .shifts-canvas{cursor:default!important;}';
+  document.head.appendChild(style);
+}
+
 /* ── INIT ── */
-load();
+const isShared = loadFromHash();
+if(isShared){
+  applyReadOnlyMode();
+} else {
+  load();
+}
 render();
 </script>
 </body>
