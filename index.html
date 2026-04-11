@@ -31,6 +31,7 @@ body{font-family:'Hiragino Sans','Meiryo','Yu Gothic',sans-serif;font-size:12px;
 .staff-nm{font-size:11px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .staff-cnt{font-size:10px;font-weight:bold;background:#e8edf4;color:#555;border-radius:8px;padding:1px 5px;flex-shrink:0;}
 .staff-cnt.alert{background:#e53935;color:#fff;}
+.staff-hrs{font-size:9px;color:#888;margin-left:2px;flex-shrink:0;}
 /* アラートバナー */
 .alert-banner{background:#fff3cd;border:1px solid #ffc107;border-radius:4px;padding:5px 8px;margin:4px 3px 2px;font-size:10px;color:#856404;display:none;}
 .alert-banner.visible{display:block;}
@@ -256,8 +257,10 @@ body{font-family:'Hiragino Sans','Meiryo','Yu Gothic',sans-serif;font-size:12px;
   </div>
   <span id="readonlyBadge" style="display:none;background:#e53935;color:#fff;border-radius:4px;padding:3px 10px;font-size:11px;font-weight:bold;">👁 閲覧専用</span>
   <button class="btn green" id="btnAutoGen" onclick="autoGenerate()">⚡ 自動生成</button>
+  <button class="btn" id="btnCopyWeek" style="background:#558b2f;color:#fff;" onclick="copyPrevWeek()">📋 前週コピー</button>
   <button class="btn orange" id="btnHoliday" onclick="openHolidaySheet()">📋 休日入力</button>
   <button class="btn blue" id="btnStaff" onclick="openStaffEditor()">👥 スタッフ編集</button>
+  <button class="btn" id="btnBackup" style="background:#546e7a;color:#fff;" onclick="openBackupModal()">💾 バックアップ</button>
   <button class="btn" style="background:#7b1fa2;color:#fff;" onclick="generateShareURL()">📤 共有URL生成</button>
   <button class="btn" id="btnPublish" style="background:#00897b;color:#fff;" onclick="publishShift()">📢 シフトを公開</button>
   <button class="btn gray" onclick="window.print()">🖨 印刷(A3横)</button>
@@ -273,6 +276,46 @@ body{font-family:'Hiragino Sans','Meiryo','Yu Gothic',sans-serif;font-size:12px;
   <div class="grid-wrap">
     <div class="sched-outer" id="grid"></div>
     <div id="printLegend"></div>
+  </div>
+</div>
+
+<!-- Backup Modal -->
+<div class="hs-overlay hidden" id="backupOverlay" onclick="if(event.target===this)closeBackupModal()">
+  <div class="hs-box" style="max-width:420px;">
+    <h3>💾 バックアップ・復元</h3>
+    <div style="margin:14px 0;display:flex;flex-direction:column;gap:10px;">
+      <div style="background:#f0f4ff;border-radius:6px;padding:12px;">
+        <b>📤 バックアップ（書き出し）</b>
+        <p style="font-size:11px;color:#666;margin:4px 0 8px;">全データをJSONファイルで保存します</p>
+        <button class="btn blue" onclick="exportBackup()" style="width:100%;">バックアップを保存</button>
+      </div>
+      <div style="background:#f0fff4;border-radius:6px;padding:12px;">
+        <b>📥 復元（読み込み）</b>
+        <p style="font-size:11px;color:#666;margin:4px 0 8px;">バックアップファイルからデータを復元します</p>
+        <input type="file" id="restoreFile" accept=".json" style="font-size:11px;width:100%;margin-bottom:6px;">
+        <button class="btn green" onclick="importBackup()" style="width:100%;">復元する</button>
+      </div>
+    </div>
+    <div class="hs-btns"><button class="btn" onclick="closeBackupModal()">閉じる</button></div>
+  </div>
+</div>
+
+<!-- シフト希望モーダル（スタッフ用） -->
+<div class="hs-overlay hidden" id="requestOverlay" onclick="if(event.target===this)closeRequestModal()">
+  <div class="hs-box" style="max-width:440px;">
+    <h3>📝 シフト希望を送る</h3>
+    <p style="font-size:11px;color:#888;margin-bottom:10px;">希望を入力してLINEでコピーし、送信してください</p>
+    <div style="margin-bottom:8px;">
+      <label style="font-size:12px;font-weight:bold;">お名前</label>
+      <input type="text" id="reqName" placeholder="山田 太郎" style="width:100%;padding:6px;border:1px solid #ddd;border-radius:4px;margin-top:3px;font-size:13px;">
+    </div>
+    <div id="reqDays" style="margin-bottom:8px;"></div>
+    <div style="margin-bottom:8px;">
+      <label style="font-size:12px;font-weight:bold;">メモ（任意）</label>
+      <textarea id="reqNote" placeholder="理由など" style="width:100%;padding:6px;border:1px solid #ddd;border-radius:4px;margin-top:3px;font-size:12px;height:50px;resize:none;"></textarea>
+    </div>
+    <button class="btn" style="background:#06c755;color:#fff;width:100%;font-size:13px;padding:8px;" onclick="copyRequestMsg()">📋 LINEでコピーして送る</button>
+    <div class="hs-btns" style="margin-top:8px;"><button class="btn" onclick="closeRequestModal()">閉じる</button></div>
   </div>
 </div>
 
@@ -638,23 +681,38 @@ function calcWeekCounts(){
   return result;
 }
 
+function calcWeekHours(){
+  const wk=weekKey(state.weekStart);
+  const scheds=state.schedules[wk]||[];
+  const result={};
+  scheds.forEach(s=>{
+    const h=Math.max(0,s.end-s.start);
+    result[s.staffId]=(result[s.staffId]||0)+h;
+  });
+  return result;
+}
+
 function renderLegend(){
   const counts=calcWeekCounts();
+  const hours=calcWeekHours();
   const LIMIT=6;
 
-  // サイドバー凡例（カラー表示 + 回数バッジ）
+  // サイドバー凡例（カラー表示 + 回数バッジ + 時間）
   document.getElementById('legend').innerHTML=state.staff.map(s=>{
     const cnt=counts[s.id]||0;
     const over=cnt>=LIMIT;
+    const h=hours[s.id]||0;
+    const hStr=h>0?`${Math.floor(h)}h${Math.round((h%1)*60)?Math.round((h%1)*60)+'m':''}`:'';
     const cntBadge=cnt>0
       ?`<span class="staff-cnt${over?' alert':''}" title="${cnt}日勤務${over?' ⚠ 週'+LIMIT+'日以上':''}">${cnt}</span>`
       :'';
+    const hrsBadge=hStr?`<span class="staff-hrs">${hStr}</span>`:'';
     return `<div class="staff-item${state.hiddenStaff.has(s.id)?' hidden-staff':''}${over?' over-limit':''}"
          onclick="toggleVis(${s.id})"
-         title="${s.name}${s.note?' ('+s.note+')':''} / 週${cnt}日${over?' ⚠ '+LIMIT+'日以上':''}">
+         title="${s.name}${s.note?' ('+s.note+')':''} / 週${cnt}日 ${hStr}${over?' ⚠ '+LIMIT+'日以上':''}">
       <div class="staff-dot" style="background:${s.color}"></div>
       <span class="staff-nm">${s.name}</span>
-      ${cntBadge}
+      ${cntBadge}${hrsBadge}
     </div>`;
   }).join('');
 
@@ -1083,7 +1141,14 @@ function renderMobileView(){
   const HOL_COLORS = {'':'','休み':'#e55353','有給':'#3062b8','欠勤':'#d4a017','その他':'#8e44ad'};
   const weekLabel = `${state.weekStart.getFullYear()}年${fmtMD(state.weekStart)} 〜 ${fmtMD(addDays(state.weekStart,6))}`;
 
+  const pubAt = state._publishedAt;
+  const pubStr = pubAt ? (() => {
+    const d=new Date(pubAt);
+    return `最終更新: ${d.getMonth()+1}/${d.getDate()} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  })() : '';
   let html = `<div class="mv-week">📅 ${weekLabel}</div>`;
+  if(pubStr) html += `<div style="text-align:center;font-size:11px;color:#999;margin-bottom:6px;">🕐 ${pubStr}</div>`;
+  html += `<div style="text-align:center;margin-bottom:10px;"><button onclick="openRequestModal()" style="background:#06c755;color:#fff;border:none;border-radius:6px;padding:8px 18px;font-size:13px;font-weight:bold;cursor:pointer;">📝 シフト希望を送る</button></div>`;
 
   for(let d=0; d<7; d++){
     const date = addDays(state.weekStart, d);
@@ -1135,13 +1200,111 @@ function applyReadOnlyMode(){
   document.body.classList.add('readonly-mode');
   document.getElementById('readonlyBadge').style.display = 'inline-block';
   document.getElementById('btnAutoGen').style.display  = 'none';
+  document.getElementById('btnCopyWeek').style.display = 'none';
   document.getElementById('btnHoliday').style.display  = 'none';
   document.getElementById('btnStaff').style.display    = 'none';
+  document.getElementById('btnBackup').style.display   = 'none';
   document.getElementById('btnPublish').style.display  = 'none';
   const style = document.createElement('style');
   style.textContent = '.del-btn{display:none!important;} .shifts-canvas{cursor:default!important;}';
   document.head.appendChild(style);
   renderMobileView();
+}
+
+/* ── ① 前週コピー ── */
+function copyPrevWeek(){
+  const wk = weekKey(state.weekStart);
+  const prevStart = addDays(state.weekStart, -7);
+  const prevWk = weekKey(prevStart);
+  const prevScheds = state.schedules[prevWk];
+  if(!prevScheds || prevScheds.length===0){
+    alert('前の週にシフトデータがありません。');
+    return;
+  }
+  if((state.schedules[wk]||[]).length>0){
+    if(!confirm(`今週(${wk})のシフトを前週からコピーしますか？\n現在のシフトは上書きされます。`)) return;
+  }
+  let maxId = Math.max(0,...Object.values(state.schedules).flat().map(s=>s.id));
+  state.schedules[wk] = prevScheds.map(s=>({...s, id:++maxId}));
+  save(); render();
+  alert('✅ 前週のシフトをコピーしました！');
+}
+
+/* ── ② バックアップ・復元 ── */
+function openBackupModal(){ document.getElementById('backupOverlay').classList.remove('hidden'); }
+function closeBackupModal(){ document.getElementById('backupOverlay').classList.add('hidden'); }
+
+function exportBackup(){
+  const data = {
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    staff: state.staff,
+    schedules: state.schedules,
+    notes: state.notes,
+    holidays: state.holidays,
+  };
+  const blob = new Blob([JSON.stringify(data,null,2)], {type:'application/json'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  const d = new Date();
+  a.download = `シフト管理バックアップ_${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}.json`;
+  a.click();
+}
+
+function importBackup(){
+  const file = document.getElementById('restoreFile').files[0];
+  if(!file){ alert('ファイルを選択してください'); return; }
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      const data = JSON.parse(e.target.result);
+      if(!data.staff || !data.schedules) throw new Error('形式が正しくありません');
+      if(!confirm('現在のデータをバックアップデータで上書きします。よろしいですか？')) return;
+      state.staff = data.staff;
+      state.schedules = data.schedules;
+      state.notes = data.notes || {};
+      state.holidays = data.holidays || {};
+      save(); render();
+      closeBackupModal();
+      alert('✅ 復元しました！');
+    } catch(err){ alert('❌ 読み込みエラー: ' + err.message); }
+  };
+  reader.readAsText(file);
+}
+
+/* ── ⑤ シフト希望（スタッフ用） ── */
+function openRequestModal(){
+  const el = document.getElementById('requestOverlay');
+  el.classList.remove('hidden');
+  // 曜日チェックボックスを生成
+  const wk = weekKey(state.weekStart);
+  const daysHtml = DAYS_JA.map((d,i)=>{
+    const date = addDays(state.weekStart,i);
+    return `<label style="display:inline-flex;align-items:center;gap:3px;margin:3px 5px 3px 0;font-size:12px;cursor:pointer;">
+      <input type="checkbox" value="${i}" name="reqDay">
+      <span>${d}(${fmtMD(date)})</span>
+    </label>`;
+  }).join('');
+  document.getElementById('reqDays').innerHTML =
+    `<label style="font-size:12px;font-weight:bold;">希望日（複数選択可）</label><br>${daysHtml}`;
+}
+function closeRequestModal(){ document.getElementById('requestOverlay').classList.add('hidden'); }
+
+function copyRequestMsg(){
+  const name = document.getElementById('reqName').value.trim();
+  if(!name){ alert('お名前を入力してください'); return; }
+  const checked = Array.from(document.querySelectorAll('input[name="reqDay"]:checked'));
+  if(checked.length===0){ alert('希望日を選択してください'); return; }
+  const wk = weekKey(state.weekStart);
+  const note = document.getElementById('reqNote').value.trim();
+  const days = checked.map(c=>{
+    const i=parseInt(c.value);
+    return `${DAYS_JA[i]}(${fmtMD(addDays(state.weekStart,i))})`;
+  }).join('・');
+  const msg = `【シフト希望】${name}\n週: ${wk}\n希望日: ${days}${note?'\nメモ: '+note:''}`;
+  navigator.clipboard.writeText(msg)
+    .then(()=>alert('✅ コピーしました！\nLINEに貼り付けて送信してください。'))
+    .catch(()=>prompt('コピーしてLINEで送ってください：', msg));
 }
 
 /* ── GitHub公開機能 ── */
@@ -1168,7 +1331,6 @@ async function publishShift(){
     nt: state.notes[wk]||{},
     hl: state.holidays[wk]||{},
   };
-  const content = btoa(unescape(encodeURIComponent(JSON.stringify(compact))));
   const apiBase = `https://api.github.com/repos/${GH_REPO}/contents/${GH_FILE}`;
   const headers = {'Authorization':'Bearer '+token,'Accept':'application/vnd.github+json','Content-Type':'application/json'};
 
@@ -1179,7 +1341,8 @@ async function publishShift(){
     if(getRes.ok){ sha = (await getRes.json()).sha; }
 
     // ファイル更新
-    const body = {message:`シフト公開: ${wk}`, content};
+    compact.publishedAt = new Date().toISOString();
+    const body = {message:`シフト公開: ${wk}`, content: btoa(unescape(encodeURIComponent(JSON.stringify(compact))))};
     if(sha) body.sha = sha;
     const putRes = await fetch(apiBase, {method:'PUT', headers, body:JSON.stringify(body)});
 
@@ -1204,6 +1367,7 @@ async function loadFromPublished(){
       const wk=data.wk; state.weekStart=new Date(wk+'T00:00:00');
       state.schedules[wk]=data.sc.map(([staffId,day,start,end,note],i)=>({id:9000+i,staffId,day,start,end,note}));
       state.notes[wk]=data.nt||{}; state.holidays[wk]=data.hl||{};
+      state._publishedAt = data.publishedAt||'';
     }
     return true;
   } catch(e){
