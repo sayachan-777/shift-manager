@@ -259,6 +259,7 @@ body{font-family:'Hiragino Sans','Meiryo','Yu Gothic',sans-serif;font-size:12px;
   <button class="btn orange" id="btnHoliday" onclick="openHolidaySheet()">📋 休日入力</button>
   <button class="btn blue" id="btnStaff" onclick="openStaffEditor()">👥 スタッフ編集</button>
   <button class="btn" style="background:#7b1fa2;color:#fff;" onclick="generateShareURL()">📤 共有URL生成</button>
+  <button class="btn" id="btnPublish" style="background:#00897b;color:#fff;" onclick="publishShift()">📢 シフトを公開</button>
   <button class="btn gray" onclick="window.print()">🖨 印刷(A3横)</button>
 </div>
 
@@ -1136,16 +1137,91 @@ function applyReadOnlyMode(){
   document.getElementById('btnAutoGen').style.display  = 'none';
   document.getElementById('btnHoliday').style.display  = 'none';
   document.getElementById('btnStaff').style.display    = 'none';
+  document.getElementById('btnPublish').style.display  = 'none';
   const style = document.createElement('style');
   style.textContent = '.del-btn{display:none!important;} .shifts-canvas{cursor:default!important;}';
   document.head.appendChild(style);
   renderMobileView();
 }
 
+/* ── GitHub公開機能 ── */
+const GH_REPO = 'sayachan-777/shift-manager';
+const GH_FILE = 'shift-data.json';
+const VIEW_URL = 'https://sayachan-777.github.io/shift-manager/?view';
+
+function getGHToken(){ return localStorage.getItem('ghToken')||''; }
+
+async function publishShift(){
+  let token = getGHToken();
+  if(!token){
+    token = prompt('GitHubトークンを入力してください（初回のみ）:');
+    if(!token) return;
+    localStorage.setItem('ghToken', token.trim());
+    token = token.trim();
+  }
+
+  const wk = weekKey(state.weekStart);
+  const compact = {
+    v:3, wk,
+    st: state.staff.map(s=>[s.id,s.name,s.color]),
+    sc: (state.schedules[wk]||[]).map(s=>[s.staffId,s.day,s.start,s.end,s.note||'']),
+    nt: state.notes[wk]||{},
+    hl: state.holidays[wk]||{},
+  };
+  const content = btoa(unescape(encodeURIComponent(JSON.stringify(compact))));
+  const apiBase = `https://api.github.com/repos/${GH_REPO}/contents/${GH_FILE}`;
+  const headers = {'Authorization':'Bearer '+token,'Accept':'application/vnd.github+json','Content-Type':'application/json'};
+
+  try {
+    // 既存ファイルのSHA取得
+    let sha = '';
+    const getRes = await fetch(apiBase, {headers});
+    if(getRes.ok){ sha = (await getRes.json()).sha; }
+
+    // ファイル更新
+    const body = {message:`シフト公開: ${wk}`, content};
+    if(sha) body.sha = sha;
+    const putRes = await fetch(apiBase, {method:'PUT', headers, body:JSON.stringify(body)});
+
+    if(putRes.ok){
+      navigator.clipboard.writeText(VIEW_URL).catch(()=>{});
+      alert(`✅ シフトを公開しました！\n1〜2分後に反映されます。\n\n従業員用URL（コピー済み）:\n${VIEW_URL}`);
+    } else {
+      const err = await putRes.json().catch(()=>({}));
+      if(putRes.status===401){ localStorage.removeItem('ghToken'); }
+      alert('❌ 公開失敗: ' + (err.message||putRes.status));
+    }
+  } catch(e){ alert('❌ エラー: ' + e.message); }
+}
+
+async function loadFromPublished(){
+  try {
+    const res = await fetch('/shift-manager/shift-data.json?t='+Date.now());
+    if(!res.ok) throw new Error('not found');
+    const data = await res.json();
+    if(data.v===3){
+      state.staff = data.st.map(([id,name,color])=>({id,name,color,defaultSchedule:[]}));
+      const wk=data.wk; state.weekStart=new Date(wk+'T00:00:00');
+      state.schedules[wk]=data.sc.map(([staffId,day,start,end,note],i)=>({id:9000+i,staffId,day,start,end,note}));
+      state.notes[wk]=data.nt||{}; state.holidays[wk]=data.hl||{};
+    }
+    return true;
+  } catch(e){
+    document.getElementById('mobileView').innerHTML = '<div style="padding:20px;text-align:center;color:#999;">まだシフトが公開されていません</div>';
+    return false;
+  }
+}
+
 /* ── INIT ── */
 (async()=>{
-  const isShared = await loadFromHash();
-  if(isShared){ applyReadOnlyMode(); } else { load(); }
+  const params = new URLSearchParams(location.search);
+  if(params.has('view')){
+    await loadFromPublished();
+    applyReadOnlyMode();
+  } else {
+    const isShared = await loadFromHash();
+    if(isShared){ applyReadOnlyMode(); } else { load(); }
+  }
   render();
 })();
 </script>
