@@ -992,14 +992,14 @@ async function generateShareURL(){
   const compressed = await compressToB64(JSON.stringify(compact));
   const longUrl = 'https://sayachan-777.github.io/shift-manager/index.html#share=' + compressed;
 
-  // URL短縮（is.gd API）
+  // URL短縮（shrtco.de API - CORS対応）
   let finalUrl = longUrl;
   try {
-    const res = await fetch('https://is.gd/create.php?format=simple&url=' + encodeURIComponent(longUrl));
+    const res = await fetch('https://api.shrtco.de/v2/shorten?url=' + encodeURIComponent(longUrl));
     if(res.ok){
-      const short = (await res.text()).trim();
-      if(short.startsWith('https://is.gd/') || short.startsWith('http://is.gd/')){
-        finalUrl = short;
+      const json = await res.json();
+      if(json.ok && json.result && json.result.full_short_link){
+        finalUrl = json.result.full_short_link;
       }
     }
   } catch(e){ /* 短縮失敗時は長いURLをそのまま使用 */ }
