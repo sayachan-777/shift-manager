@@ -992,22 +992,36 @@ async function generateShareURL(){
   const compressed = await compressToB64(JSON.stringify(compact));
   const longUrl = 'https://sayachan-777.github.io/shift-manager/index.html#share=' + compressed;
 
-  // URL短縮（shrtco.de API - CORS対応）
+  // URL短縮（TinyURL via allorigins.win プロキシ）
   let finalUrl = longUrl;
-  try {
-    const res = await fetch('https://api.shrtco.de/v2/shorten?url=' + encodeURIComponent(longUrl));
-    if(res.ok){
+  const shorteners = [
+    async () => {
+      const proxyUrl = 'https://api.allorigins.win/raw?url=' + encodeURIComponent('https://tinyurl.com/api-create.php?url=' + encodeURIComponent(longUrl));
+      const res = await fetch(proxyUrl);
+      if(!res.ok) throw new Error('failed');
+      const txt = (await res.text()).trim();
+      if(txt.startsWith('https://tinyurl.com/')) return txt;
+      throw new Error('bad response');
+    },
+    async () => {
+      const res = await fetch('https://api.shrtco.de/v2/shorten?url=' + encodeURIComponent(longUrl));
+      if(!res.ok) throw new Error('failed');
       const json = await res.json();
-      if(json.ok && json.result && json.result.full_short_link){
-        finalUrl = json.result.full_short_link;
-      }
-    }
-  } catch(e){ /* 短縮失敗時は長いURLをそのまま使用 */ }
+      if(json.ok && json.result && json.result.full_short_link) return json.result.full_short_link;
+      throw new Error('bad response');
+    },
+  ];
+  for(const fn of shorteners){
+    try{ finalUrl = await fn(); break; }catch(e){}
+  }
 
-  const msg = finalUrl === longUrl
-    ? `✅ 共有URLをコピーしました！\n（短縮に失敗したため元のURLを使用）\n\nURL長さ: ${finalUrl.length}文字`
-    : `✅ 共有URLをコピーしました！\n従業員にこのURLをLINEで送ってください。\n\n${finalUrl}`;
-  navigator.clipboard.writeText(finalUrl).then(()=>alert(msg)).catch(()=>prompt('URLをコピーしてください：',finalUrl));
+  if(finalUrl === longUrl){
+    // 短縮失敗：プロンプトで長いURLを表示してコピーしやすくする
+    prompt('URLをコピーしてLINEで送ってください（全選択→コピー）：', finalUrl);
+  } else {
+    const msg = `✅ 共有URLをコピーしました！\n以下のURLをLINEで送ってください。\n\n${finalUrl}`;
+    navigator.clipboard.writeText(finalUrl).then(()=>alert(msg)).catch(()=>prompt('URLをコピーしてください：',finalUrl));
+  }
 }
 
 async function loadFromHash(){
