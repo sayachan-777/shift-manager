@@ -1184,7 +1184,16 @@ function renderMobileView(){
   })() : '';
   let html = `<div class="mv-week">📅 ${weekLabel}</div>`;
   if(pubStr) html += `<div style="text-align:center;font-size:11px;color:#999;margin-bottom:6px;">🕐 ${pubStr}</div>`;
-  html += `<div style="text-align:center;margin-bottom:10px;"><button onclick="openRequestModal()" style="background:#06c755;color:#fff;border:none;border-radius:6px;padding:8px 18px;font-size:13px;font-weight:bold;cursor:pointer;">📝 シフト希望を送る</button></div>`;
+
+  // 週ナビゲーション
+  const wks = Object.keys(_viewWeeks).sort();
+  const idx = wks.indexOf(_viewWk);
+  const hasPrev = idx > 0, hasNext = idx < wks.length-1;
+  html += `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:6px;">
+    <button onclick="viewChangeWeek(-1)" ${hasPrev?'':'disabled'} style="flex:1;padding:7px;border:none;border-radius:6px;background:${hasPrev?'#1a4a7a':'#ddd'};color:${hasPrev?'#fff':'#aaa'};font-size:13px;cursor:${hasPrev?'pointer':'default'};">◀ 前の週</button>
+    <button onclick="openRequestModal()" style="flex:1.5;padding:7px;border:none;border-radius:6px;background:#06c755;color:#fff;font-size:12px;font-weight:bold;cursor:pointer;">📝 シフト希望</button>
+    <button onclick="viewChangeWeek(1)" ${hasNext?'':'disabled'} style="flex:1;padding:7px;border:none;border-radius:6px;background:${hasNext?'#1a4a7a':'#ddd'};color:${hasNext?'#fff':'#aaa'};font-size:13px;cursor:${hasNext?'pointer':'default'};">次の週 ▶</button>
+  </div>`;
 
   for(let d=0; d<7; d++){
     const date = addDays(state.weekStart, d);
@@ -1363,25 +1372,42 @@ async function publishShift(){
   }
 
   const wk = weekKey(state.weekStart);
-  const compact = {
+  const weekData = {
     v:3, wk,
     st: state.staff.map(s=>[s.id,s.name,s.color]),
     sc: (state.schedules[wk]||[]).map(s=>[s.staffId,s.day,s.start,s.end,s.note||'']),
     nt: state.notes[wk]||{},
     hl: state.holidays[wk]||{},
+    publishedAt: new Date().toISOString(),
   };
+
   const apiBase = `https://api.github.com/repos/${GH_REPO}/contents/${GH_FILE}`;
   const headers = {'Authorization':'Bearer '+token,'Accept':'application/vnd.github+json','Content-Type':'application/json'};
 
   try {
-    // 既存ファイルのSHA取得
-    let sha = '';
+    // 既存ファイル取得（複数週データをマージ）
+    let sha = '', existingWeeks = {};
     const getRes = await fetch(apiBase, {headers});
-    if(getRes.ok){ sha = (await getRes.json()).sha; }
+    if(getRes.ok){
+      const existing = await getRes.json();
+      sha = existing.sha;
+      try {
+        const parsed = JSON.parse(decodeURIComponent(escape(atob(existing.content.replace(/\n/g,'')))));
+        existingWeeks = parsed.weeks || {};
+        // 旧フォーマット（単一週）の互換
+        if(parsed.wk && !parsed.weeks) existingWeeks[parsed.wk] = parsed;
+      } catch(e){}
+    }
 
-    // ファイル更新
-    compact.publishedAt = new Date().toISOString();
-    const body = {message:`シフト公開: ${wk}`, content: btoa(unescape(encodeURIComponent(JSON.stringify(compact))))};
+    // 今週のデータをマージ
+    existingWeeks[wk] = weekData;
+    // 古い週（12週以上前）は削除
+    const allWks = Object.keys(existingWeeks).sort();
+    if(allWks.length > 12) allWks.slice(0, allWks.length-12).forEach(k=>delete existingWeeks[k]);
+
+    const saveData = { version:2, latestWk:wk, publishedAt:weekData.publishedAt, weeks:existingWeeks };
+    const content = btoa(unescape(encodeURIComponent(JSON.stringify(saveData))));
+    const body = {message:`シフト公開: ${wk}`, content};
     if(sha) body.sha = sha;
     const putRes = await fetch(apiBase, {method:'PUT', headers, body:JSON.stringify(body)});
 
@@ -1396,23 +1422,53 @@ async function publishShift(){
   } catch(e){ alert('❌ エラー: ' + e.message); }
 }
 
+// スタッフビュー用：表示中の週キー
+let _viewWk = '';
+let _viewWeeks = {};
+
+function loadWeekToView(wk){
+  const data = _viewWeeks[wk];
+  if(!data) return;
+  _viewWk = wk;
+  state.staff = data.st.map(([id,name,color])=>({id,name,color,defaultSchedule:[]}));
+  state.weekStart = new Date(wk+'T00:00:00');
+  state.schedules[wk] = (data.sc||[]).map(([staffId,day,start,end,note],i)=>({id:9000+i,staffId,day,start,end,note}));
+  state.notes[wk] = data.nt||{};
+  state.holidays[wk] = data.hl||{};
+  state._publishedAt = data.publishedAt||'';
+  renderMobileView();
+}
+
 async function loadFromPublished(){
   try {
     const res = await fetch('/shift-manager/shift-data.json?t='+Date.now());
     if(!res.ok) throw new Error('not found');
     const data = await res.json();
-    if(data.v===3){
-      state.staff = data.st.map(([id,name,color])=>({id,name,color,defaultSchedule:[]}));
-      const wk=data.wk; state.weekStart=new Date(wk+'T00:00:00');
-      state.schedules[wk]=data.sc.map(([staffId,day,start,end,note],i)=>({id:9000+i,staffId,day,start,end,note}));
-      state.notes[wk]=data.nt||{}; state.holidays[wk]=data.hl||{};
-      state._publishedAt = data.publishedAt||'';
+
+    // 複数週フォーマット(v2)
+    if(data.version===2 && data.weeks){
+      _viewWeeks = data.weeks;
+      const wks = Object.keys(_viewWeeks).sort();
+      // 最新週を表示
+      loadWeekToView(data.latestWk || wks[wks.length-1]);
+    }
+    // 旧フォーマット(v3単一週)
+    else if(data.v===3){
+      _viewWeeks = {[data.wk]: data};
+      loadWeekToView(data.wk);
     }
     return true;
   } catch(e){
     document.getElementById('mobileView').innerHTML = '<div style="padding:20px;text-align:center;color:#999;">まだシフトが公開されていません</div>';
     return false;
   }
+}
+
+function viewChangeWeek(dir){
+  const wks = Object.keys(_viewWeeks).sort();
+  const idx = wks.indexOf(_viewWk);
+  const next = idx + dir;
+  if(next >= 0 && next < wks.length) loadWeekToView(wks[next]);
 }
 
 /* ── INIT ── */
