@@ -156,6 +156,8 @@ body{font-family:'Hiragino Sans','Meiryo','Yu Gothic',sans-serif;font-size:12px;
 
 /* ── PRINT LEGEND (hidden on screen) ── */
 #printLegend{display:none;}
+/* ── PRINT TITLE (hidden on screen) ── */
+.print-title-header{display:none;}
 
 /* ── MOBILE VIEW (read-only shared URL) ── */
 .mobile-view{display:none;padding:8px;max-width:600px;margin:0 auto;}
@@ -179,21 +181,40 @@ body{font-family:'Hiragino Sans','Meiryo','Yu Gothic',sans-serif;font-size:12px;
 
 /* ── PRINT ── */
 @media print{
-  @page{size:A3 landscape;margin:6mm;}
-  body{background:#fff;font-size:8px;}
-  .app-header,.sidebar,.overlay,.se-overlay{display:none!important;}
-  .app-body{height:auto;display:block;}
-  .grid-wrap{overflow:visible;height:auto;}
-  .sched-outer{width:100%;}
+  @page{size:A3 landscape;margin:6mm 8mm 6mm 8mm;}
+  html,body{background:#fff;font-size:8px;height:auto!important;}
+  .app-header,.sidebar,.overlay,.se-overlay,.mobile-view{display:none!important;}
+  .app-body{height:auto;display:block;overflow:visible;}
+  .grid-wrap{overflow:visible;height:auto;padding-bottom:0;margin-bottom:0;}
+  .sched-outer{width:100%;margin-bottom:0;padding-bottom:0;}
   .time-canvas,.shifts-canvas{width:100%!important;}
-  .corner-cell{position:static!important;width:18mm;}
+  .corner-cell{position:static!important;width:24mm;min-width:24mm;}
   .time-canvas-wrap{position:static!important;}
   .notes-hdr{position:static!important;}
-  .day-label{position:static!important;width:18mm;}
+  .day-label{position:static!important;width:24mm;min-width:24mm;padding:5px 6px;}
   .shifts-canvas-wrap{position:static!important;height:auto!important;}
   .shifts-canvas{height:auto!important;}
-  .day-name{font-size:11px;}
-  .day-date{font-size:8px;}
+  /* 日付列を大きく・見やすく */
+  .day-name{font-size:16px!important;font-weight:bold!important;line-height:1.2;}
+  .day-date{font-size:13px!important;color:#333!important;font-weight:bold!important;margin-top:1px;}
+  .holiday-badge{font-size:9px!important;}
+  .holiday-name{font-size:10px!important;}
+  /* 印刷タイトル */
+  .print-title-header{
+    display:block!important;
+    text-align:center;
+    padding:4px 0 6px;
+    margin-bottom:3px;
+    border-bottom:2.5px solid #1a4a7a;
+  }
+  .print-title-header .pt-main{
+    font-size:22px;font-weight:bold;color:#1a4a7a;letter-spacing:2px;
+    -webkit-print-color-adjust:exact;print-color-adjust:exact;
+  }
+  .print-title-header .pt-sub{
+    font-size:13px;color:#444;margin-top:2px;
+    -webkit-print-color-adjust:exact;print-color-adjust:exact;
+  }
   /* モノクロ印刷: カラー背景を外してパターンで識別 */
   .shift-block{
     background:#fff!important;
@@ -276,6 +297,7 @@ body{font-family:'Hiragino Sans','Meiryo','Yu Gothic',sans-serif;font-size:12px;
     <div id="legend"></div>
   </div>
   <div class="grid-wrap">
+    <div id="printTitle" class="print-title-header"></div>
     <div class="sched-outer" id="grid"></div>
     <div id="printLegend"></div>
   </div>
@@ -698,6 +720,14 @@ function pad(n){return String(n).padStart(2,'0');}
 /* ── RENDER ── */
 function render(){
   document.getElementById('weekLabel').textContent=fmtWeek(state.weekStart);
+  // 印刷用タイトル更新
+  const ptEl=document.getElementById('printTitle');
+  if(ptEl){
+    const ws=state.weekStart;
+    const we=addDays(ws,6);
+    const fmt=d=>`${d.getFullYear()}年${d.getMonth()+1}月${d.getDate()}日`;
+    ptEl.innerHTML=`<div class="pt-main">📅 シフト表</div><div class="pt-sub">${fmt(ws)}（月）〜 ${fmt(we)}（日）</div>`;
+  }
   renderGrid(); renderLegend();
 }
 
