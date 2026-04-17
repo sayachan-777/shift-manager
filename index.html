@@ -1213,7 +1213,10 @@ function renderMobileView(){
     const d=new Date(pubAt);
     return `最終更新: ${d.getMonth()+1}/${d.getDate()} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
   })() : '';
-  let html = `<div class="mv-week">📅 ${weekLabel}</div>`;
+  let html = `<div class="mv-week" style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
+    <span style="flex:1;text-align:center;">📅 ${weekLabel}</span>
+    <button onclick="loadFromPublished()" style="background:rgba(255,255,255,0.25);border:none;border-radius:6px;color:#fff;font-size:13px;padding:4px 8px;cursor:pointer;flex-shrink:0;" title="最新データを取得">🔄</button>
+  </div>`;
   if(pubStr) html += `<div style="text-align:center;font-size:11px;color:#999;margin-bottom:6px;">🕐 ${pubStr}</div>`;
 
   // 週ナビゲーション
@@ -1471,16 +1474,36 @@ function loadWeekToView(wk){
 }
 
 async function loadFromPublished(){
+  const mvEl = document.getElementById('mobileView');
+  mvEl.innerHTML = '<div style="padding:20px;text-align:center;color:#999;">📡 読み込み中...</div>';
   try {
-    const res = await fetch('/shift-manager/shift-data.json?t='+Date.now());
-    if(!res.ok) throw new Error('not found');
-    const data = await res.json();
+    let data = null;
+
+    // ① GitHub API で直接取得（CDNキャッシュを完全回避）
+    try {
+      const apiUrl = `https://api.github.com/repos/${GH_REPO}/contents/${GH_FILE}`;
+      const res = await fetch(apiUrl, {
+        headers:{'Accept':'application/vnd.github.v3+json'},
+        cache:'no-store'
+      });
+      if(res.ok){
+        const meta = await res.json();
+        data = JSON.parse(decodeURIComponent(escape(atob(meta.content.replace(/\n/g,'')))));
+      }
+    } catch(e1){}
+
+    // ② フォールバック: raw.githubusercontent.com
+    if(!data){
+      const rawUrl = `https://raw.githubusercontent.com/${GH_REPO}/main/${GH_FILE}?t=${Date.now()}`;
+      const res2 = await fetch(rawUrl, {cache:'no-store'});
+      if(!res2.ok) throw new Error('not found');
+      data = await res2.json();
+    }
 
     // 複数週フォーマット(v2)
     if(data.version===2 && data.weeks){
       _viewWeeks = data.weeks;
       const wks = Object.keys(_viewWeeks).sort();
-      // 最新週を表示
       loadWeekToView(data.latestWk || wks[wks.length-1]);
     }
     // 旧フォーマット(v3単一週)
@@ -1490,7 +1513,7 @@ async function loadFromPublished(){
     }
     return true;
   } catch(e){
-    document.getElementById('mobileView').innerHTML = '<div style="padding:20px;text-align:center;color:#999;">まだシフトが公開されていません</div>';
+    mvEl.innerHTML = '<div style="padding:20px;text-align:center;color:#999;">まだシフトが公開されていません</div>';
     return false;
   }
 }
