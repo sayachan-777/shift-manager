@@ -1225,7 +1225,6 @@ function renderMobileView(){
   const hasPrev = idx > 0, hasNext = idx < wks.length-1;
   html += `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:6px;">
     <button onclick="viewChangeWeek(-1)" ${hasPrev?'':'disabled'} style="flex:1;padding:7px;border:none;border-radius:6px;background:${hasPrev?'#1a4a7a':'#ddd'};color:${hasPrev?'#fff':'#aaa'};font-size:13px;cursor:${hasPrev?'pointer':'default'};">◀ 前の週</button>
-    <button onclick="openRequestModal()" style="flex:1.5;padding:7px;border:none;border-radius:6px;background:#06c755;color:#fff;font-size:12px;font-weight:bold;cursor:pointer;">📝 シフト希望</button>
     <button onclick="viewChangeWeek(1)" ${hasNext?'':'disabled'} style="flex:1;padding:7px;border:none;border-radius:6px;background:${hasNext?'#1a4a7a':'#ddd'};color:${hasNext?'#fff':'#aaa'};font-size:13px;cursor:${hasNext?'pointer':'default'};">次の週 ▶</button>
   </div>`;
 
